@@ -52,8 +52,11 @@ def main():
         data_dir=args.data_dir
     )
     
-    # Class names (modify based on your dataset)
-    class_names = [f"class_{i}" for i in range(config.num_classes)]
+    # Class names (loaded from dataset)
+    from data.dataset import AudioSpectrogramDataset
+    temp_dataset = AudioSpectrogramDataset(config.data_dir, config=config)
+    class_names = temp_dataset.classes
+    print(f"Classes found: {class_names}")
     
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

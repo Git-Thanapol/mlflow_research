@@ -14,7 +14,8 @@ class Config:
     num_classes: int = 10
     batch_size: int = 32
     num_workers: int = 4
-    k_folds: int = 5
+    #k_folds: int = 5 # fine trianing
+    k_folds: int = 3 # fast check
     seed: int = 42
     
     # Audio specific
@@ -51,9 +52,10 @@ class Config:
     num_masks: int = 2
     
     # MLflow
-    experiment_name: str = "audio_spectrogram_classification"
+    experiment_name: str = "Test"
     run_name: Optional[str] = None
-    tracking_uri: str = "http://localhost:5000"
+    #tracking_uri: str = "http://localhost:5000" # Prod
+    tracking_uri: str = "http://localhost:5001" # Dev
     
     def to_dict(self) -> Dict[str, Any]:
         return {k: v for k, v in self.__dict__.items()}
