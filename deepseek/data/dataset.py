@@ -8,6 +8,7 @@ from typing import Tuple, Dict, Any, Optional
 import librosa
 from PIL import Image
 import json
+import copy
 
 class AudioSpectrogramDataset(Dataset):
     """Dataset for audio spectrogram classification with metadata support"""
@@ -37,11 +38,20 @@ class AudioSpectrogramDataset(Dataset):
     def _load_samples(self) -> list:
         """Load spectrogram file paths and corresponding labels"""
         samples = []
-        for class_dir in self.data_dir.iterdir():
-            if class_dir.is_dir():
-                label = int(class_dir.name)
-                for img_file in class_dir.glob("*.png"):
-                    samples.append((str(img_file), label))
+        # Find all png files
+        files = sorted(list(self.data_dir.glob("*.png")))
+        
+        # Extract classes from filenames (assuming format ClassName_...)
+        classes =  sorted(list(set(f.name.split('_')[0] for f in files)))
+        self.class_to_idx = {cls_name: idx for idx, cls_name in enumerate(classes)}
+        self.classes = classes
+        
+        for img_file in files:
+            class_name = img_file.name.split('_')[0]
+            label = self.class_to_idx[class_name]
+            samples.append((str(img_file), label))
+            
+        print(f"Found {len(classes)} classes: {self.class_to_idx}")
         return samples
     
     def _load_metadata(self, file_path: str) -> torch.Tensor:
@@ -95,9 +105,6 @@ class AudioAugmentation:
         # Standard spectrogram augmentations
         self.train_transform = transforms.Compose([
             transforms.Resize(config.image_size),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                std=[0.229, 0.224, 0.225]),
@@ -110,28 +117,7 @@ class AudioAugmentation:
                                std=[0.229, 0.224, 0.225]),
         ])
     
-    def frequency_masking(self, spectrogram: torch.Tensor) -> torch.Tensor:
-        """Apply frequency masking (SpecAugment style)"""
-        if self.config.freq_mask_param > 0:
-            f = np.random.randint(0, self.config.freq_mask_param)
-            f0 = np.random.randint(0, spectrogram.size(1) - f)
-            spectrogram[:, f0:f0+f, :] = 0
-        return spectrogram
-    
-    def time_masking(self, spectrogram: torch.Tensor) -> torch.Tensor:
-        """Apply time masking (SpecAugment style)"""
-        if self.config.time_mask_param > 0:
-            t = np.random.randint(0, self.config.time_mask_param)
-            t0 = np.random.randint(0, spectrogram.size(2) - t)
-            spectrogram[:, :, t0:t0+t] = 0
-        return spectrogram
-    
-    def __call__(self, spectrogram: torch.Tensor, mode: str = "train") -> torch.Tensor:
-        if mode == "train" and self.config.num_masks > 0:
-            for _ in range(self.config.num_masks):
-                spectrogram = self.frequency_masking(spectrogram)
-                spectrogram = self.time_masking(spectrogram)
-        return spectrogram
+
 
 
 def get_data_loaders(

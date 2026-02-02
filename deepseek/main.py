@@ -32,7 +32,7 @@ def main():
                        help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-3,
                        help="Learning rate")
-    parser.add_argument("--data_dir", type=str, default="./data/spectrograms",
+    parser.add_argument("--data_dir", type=str, default=Config.data_dir,
                        help="Directory containing spectrogram data")
     parser.add_argument("--no_kfold", action="store_true",
                        help="Disable k-fold cross validation")

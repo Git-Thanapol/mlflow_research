@@ -2,13 +2,15 @@
 import torch
 from dataclasses import dataclass
 from typing import Tuple, Optional, Dict, Any
+from pathlib import Path
 
 @dataclass
 class Config:
     """Configuration for audio spectrogram classification framework"""
     # Data parameters
-    data_dir: str = "./data/spectrograms"
-    image_size: Tuple[int, int] = (224, 224)
+
+    data_dir: str = str(Path(__file__).resolve().parent.parent / "mel_spectrograms")
+    image_size: Tuple[int, int] = (384, 384)
     num_classes: int = 10
     batch_size: int = 32
     num_workers: int = 4
@@ -16,7 +18,7 @@ class Config:
     seed: int = 42
     
     # Audio specific
-    sample_rate: int = 16000
+    sample_rate: int = 44100
     n_mels: int = 128
     n_fft: int = 2048
     hop_length: int = 512

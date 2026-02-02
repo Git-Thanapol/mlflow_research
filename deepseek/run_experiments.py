@@ -1,4 +1,4 @@
-# run_experiments.py
+import sys
 import subprocess
 import time
 from typing import List
@@ -15,7 +15,7 @@ def run_all_experiments():
         
         # Run with k-fold cross validation
         cmd = [
-            "python", "main.py",
+            sys.executable, "main.py",
             "--model", model,
             "--k_folds", "5",
             "--epochs", "50",
