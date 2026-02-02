@@ -1,0 +1,230 @@
+Role: You are a Senior Machine Learning Engineer specializing in Audio Signal Processing and Computer Vision.
+
+Objective: Build a modular PyTorch research framework to classify audio spectrograms. The goal is to compare four specific architectures and log all metadata to MLflow.
+
+1. Model Architectures to Implement:
+
+Baseline CNN: A standard ResNet-style backbone.
+
+CNN + MLP: A CNN extractor with a custom Multi-Layer Perceptron head for auxiliary metadata.
+
+CNN + Attention: A CNN backbone followed by a Spatial/Channel Attention module (e.g., CBAM).
+
+AST (Audio Spectrogram Transformer): Implementing a Vision Transformer (ViT) approach specifically for audio.
+
+2. Engineering Requirements:
+
+Library: PyTorch (using torchvision for CNNs and timm or transformers for AST).
+
+Experiment Management: Integrate MLflow. Every run should log:
+
+A params dictionary (Learning Rate, Optimizer, Batch Size, Dropout, Model Version).
+
+Training/Validation metrics per epoch.
+
+The model state dict (artifact).
+
+Data Pipeline: Use Dataset and DataLoader classes. Include standard augmentations for spectrograms (Frequency/Time masking).
+
+3. Validation & Evaluation Strategy:
+
+Implement k-Fold Cross-Validation support.
+
+Metrics: Log Accuracy, F1-Score (Weighted), Precision, Recall, and a Confusion Matrix (saved as an MLflow artifact).
+
+Include a Learning Rate Scheduler (e.g., ReduceLROnPlateau).
+
+4. Code Structure:
+
+Provide a configuration dictionary for all hyperparameters.
+
+Use a "Trainer" class to handle the training loop to ensure consistency across different model comparisons.
+
+
+We are building a modular PyTorch research framework for classifying audio spectrograms.
+We will implement four model architectures and use MLflow for experiment tracking.
+
+Steps:
+
+Define the configuration dictionary for hyperparameters.
+
+Implement the data pipeline (Dataset and DataLoader) with augmentations.
+
+Implement the four model architectures.
+
+Create a Trainer class to handle training and validation loops, and integrate MLflow logging.
+
+Implement k-fold cross-validation.
+
+Let's break down the code into sections.
+
+Note: We assume that the input spectrograms are in the form of 2D images (time-frequency representations).
+
+We'll structure the project as follows:
+
+config: dictionary of hyperparameters and settings.
+
+data_loader.py: contains CustomDataset and get_data_loaders for k-fold.
+
+models.py: contains the four model architectures.
+
+trainer.py: contains the Trainer class.
+
+main.py: main script to run the experiment with k-fold cross-validation.
+
+Let's start by defining the configuration.
+
+I'll build a comprehensive PyTorch research framework for audio spectrogram classification with MLflow integration. Let me structure this modularly.
+
+
+Framework Features:
+1. Modular Architecture:
+Clean separation of concerns (data, models, training, evaluation)
+
+Factory pattern for model instantiation
+
+Configurable hyperparameters via dataclass
+
+2. Four Model Implementations:
+BaselineCNN: Standard ResNet backbone
+
+CNN+MLP: Combines visual features with audio metadata
+
+CNN+Attention: CBAM attention modules for spatial/channel attention
+
+AST: Vision Transformer adapted for audio spectrograms
+
+3. Comprehensive MLflow Integration:
+Logs all hyperparameters, metrics, and artifacts
+
+Tracks model state dicts
+
+Saves confusion matrices as images
+
+Aggregates k-fold results
+
+4. Advanced Features:
+K-fold cross-validation with stratification
+
+Multiple schedulers (ReduceLROnPlateau, Cosine, Step)
+
+SpecAugment-style audio augmentations
+
+Metadata integration for CNN+MLP model
+
+Reproducibility with seed setting
+
+5. Evaluation Metrics:
+Accuracy, F1-Score (weighted), Precision, Recall
+
+Confusion matrix visualization
+
+Per-fold and aggregated statistics
+
+Structure:
+config: dictionary of hyperparameters and settings.
+data_loader.py: contains CustomDataset and get_data_loaders for k-fold.
+models.py: contains the four model architectures.
+trainer.py: contains the Trainer class.
+main.py: main script to run the experiment with k-fold cross-validation.
+
+audio_spectrogram_framework/
+│
+├── README.md
+├── requirements.txt
+├── config.py
+├── main.py
+├── run_experiments.py
+├── kfold_cross_validation.py
+├── trainer.py
+│
+├── data/
+│   ├── __init__.py
+│   ├── dataset.py
+│   ├── audio_augmentation.py
+│   └── preprocessing.py
+│
+├── models/
+│   ├── __init__.py
+│   ├── base_model.py
+│   ├── baseline_cnn.py
+│   ├── cnn_mlp.py
+│   ├── cnn_attention.py
+│   ├── ast.py
+│   └── attention_modules/
+│       ├── __init__.py
+│       ├── cbam.py
+│       ├── spatial_attention.py
+│       └── channel_attention.py
+│
+├── utils/
+│   ├── __init__.py
+│   ├── metrics.py
+│   ├── visualization.py
+│   ├── audio_utils.py
+│   └── mlflow_utils.py
+│
+├── scripts/
+│   ├── preprocess_audio.py
+│   ├── create_spectrograms.py
+│   ├── generate_metadata.py
+│   └── analyze_results.py
+│
+├── experiments/
+│   ├── configs/
+│   │   ├── baseline_cnn_config.yaml
+│   │   ├── cnn_mlp_config.yaml
+│   │   ├── cnn_attention_config.yaml
+│   │   └── ast_config.yaml
+│   └── results/
+│       ├── model_comparison.md
+│       └── best_models/
+│
+├── notebooks/
+│   ├── 01_data_exploration.ipynb
+│   ├── 02_model_comparison.ipynb
+│   └── 03_results_analysis.ipynb
+│
+├── tests/
+│   ├── __init__.py
+│   ├── test_models.py
+│   ├── test_dataset.py
+│   ├── test_trainer.py
+│   └── test_metrics.py
+│
+├── data/
+│   ├── raw_audio/
+│   │   ├── train/
+│   │   │   ├── class_0/
+│   │   │   ├── class_1/
+│   │   │   └── .../
+│   │   └── test/
+│   │       ├── class_0/
+│   │       ├── class_1/
+│   │       └── .../
+│   │
+│   ├── spectrograms/
+│   │   ├── train/
+│   │   │   ├── 0/
+│   │   │   ├── 1/
+│   │   │   └── .../
+│   │   └── val/
+│   │       ├── 0/
+│   │       ├── 1/
+│   │       └── .../
+│   │
+│   ├── metadata/
+│   │   ├── train_metadata.json
+│   │   └── val_metadata.json
+│   │
+│   └── splits/
+│       ├── train_fold_0.txt
+│       ├── val_fold_0.txt
+│       └── .../
+│
+└── mlruns/
+    ├── 0/
+    │   ├── meta.yaml
+    │   └── .../
+    ├── 1/
+    └── .../

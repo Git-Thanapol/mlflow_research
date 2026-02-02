@@ -1,0 +1,8 @@
+# Single model training
+python main.py --model cnn_attention --epochs 100 --batch_size 64
+
+# Cross-validation for all models
+python run_experiments.py
+
+# Train AST with custom parameters
+python main.py --model ast --lr 5e-4 --batch_size 16 --no_kfold
