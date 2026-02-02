@@ -220,7 +220,9 @@ class Trainer:
         # Initialize tracking
         history = {
             'train_loss': [], 'train_accuracy': [], 'train_f1': [],
-            'val_loss': [], 'val_accuracy': [], 'val_f1': []
+            'train_precision': [], 'train_recall': [],
+            'val_loss': [], 'val_accuracy': [], 'val_f1': [],
+            'val_precision': [], 'val_recall': []
         }
         
         best_val_accuracy = 0

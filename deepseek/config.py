@@ -31,7 +31,7 @@ class Config:
     embedding_dim: int = 512
     
     # AST specific
-    ast_input_size: Tuple[int, int] = (128, 1000)  # (freq_bins, time_frames)
+    ast_input_size: Tuple[int, int] = (384, 384)  # (freq_bins, time_frames)
     ast_patch_size: Tuple[int, int] = (16, 16)
     ast_dim: int = 768
     ast_depth: int = 12
