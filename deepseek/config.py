@@ -9,7 +9,8 @@ class Config:
     """Configuration for audio spectrogram classification framework"""
     # Data parameters
 
-    data_dir: str = str(Path(__file__).resolve().parent.parent / "mel_spectrograms")
+    #data_dir: str = str(Path(__file__).resolve().parent.parent / "mel_spectrograms"
+    data_dir: str = "~/notebooks/prop_fault_detection/dataset_output/mel_spectrograms" #linux path
     image_size: Tuple[int, int] = (384, 384)
     num_classes: int = 10
     batch_size: int = 32
@@ -40,6 +41,7 @@ class Config:
     
     # Training parameters
     epochs: int = 50
+    early_stopping_patience: int = 20
     learning_rate: float = 1e-3
     optimizer: str = "adamw"  # adam, adamw, sgd
     scheduler: str = "reduce_on_plateau"  # reduce_on_plateau, cosine, step

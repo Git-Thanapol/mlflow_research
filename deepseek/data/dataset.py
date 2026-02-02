@@ -21,7 +21,8 @@ class AudioSpectrogramDataset(Dataset):
         metadata_file: Optional[str] = None,
         config: Optional[Any] = None
     ):
-        self.data_dir = Path(data_dir)
+        #self.data_dir = Path(data_dir)
+        self.data_dir = Path(data_dir).expanduser() #linux path
         self.transform = transform
         self.mode = mode
         self.config = config

@@ -13,6 +13,7 @@ from typing import Dict, List, Tuple, Optional, Any
 import os
 from tqdm import tqdm
 import warnings
+import pandas as pd
 warnings.filterwarnings('ignore')
 
 
@@ -184,7 +185,48 @@ class Trainer:
         plt.tight_layout()
         return fig
     
-    def log_to_mlflow(self, params: Dict, metrics: Dict, cm_fig: Optional[plt.Figure] = None, nested: bool = True):
+    def _log_history_artifacts(self, history: Dict):
+        """Log history CSV and plots to MLflow"""
+        # Create DataFrame
+        df = pd.DataFrame(history)
+        df['epoch'] = range(1, len(df) + 1)
+        
+        # Save CSV
+        csv_path = "history.csv"
+        df.to_csv(csv_path, index=False)
+        mlflow.log_artifact(csv_path)
+        
+        # Plot Accuracy
+        fig_acc, ax_acc = plt.subplots(figsize=(10, 6))
+        ax_acc.plot(df['epoch'], df['train_accuracy'], label='Train Accuracy')
+        ax_acc.plot(df['epoch'], df['val_accuracy'], label='Validation Accuracy')
+        ax_acc.set_xlabel('Epoch')
+        ax_acc.set_ylabel('Accuracy')
+        ax_acc.set_title(f'Accuracy over Epochs ({self.config.run_name})')
+        ax_acc.legend()
+        ax_acc.grid(True)
+        
+        acc_plot_path = "accuracy_plot.png"
+        fig_acc.savefig(acc_plot_path)
+        plt.close(fig_acc)
+        mlflow.log_artifact(acc_plot_path)
+        
+        # Plot Loss
+        fig_loss, ax_loss = plt.subplots(figsize=(10, 6))
+        ax_loss.plot(df['epoch'], df['train_loss'], label='Train Loss')
+        ax_loss.plot(df['epoch'], df['val_loss'], label='Validation Loss')
+        ax_loss.set_xlabel('Epoch')
+        ax_loss.set_ylabel('Loss')
+        ax_loss.set_title(f'Loss over Epochs ({self.config.run_name})')
+        ax_loss.legend()
+        ax_loss.grid(True)
+        
+        loss_plot_path = "loss_plot.png"
+        fig_loss.savefig(loss_plot_path)
+        plt.close(fig_loss)
+        mlflow.log_artifact(loss_plot_path)
+
+    def log_to_mlflow(self, params: Dict, metrics: Dict, history: Dict, cm_fig: Optional[plt.Figure] = None, nested: bool = True):
         """Log experiment data to MLflow"""
         with mlflow.start_run(run_name=self.config.run_name, nested=nested):
             # Log parameters
@@ -207,6 +249,9 @@ class Trainer:
                 with open("config.json", "w") as f:
                     json.dump(self.config.to_dict(), f, indent=2)
                 mlflow.log_artifact("config.json")
+            
+            # Log history artifacts (CSV & Plots)
+            self._log_history_artifacts(history)
     
     def train(
         self,
@@ -230,6 +275,7 @@ class Trainer:
         best_model_state = None
         best_metrics = {}
         best_cm_fig = None
+        patience_counter = 0
         
         # MLflow run name
         if fold_idx is not None:
@@ -276,6 +322,16 @@ class Trainer:
                 best_metrics = {**train_metrics, **val_metrics}
                 best_metrics['best_val_accuracy'] = best_val_accuracy
                 best_metrics['epoch'] = epoch + 1
+                
+                # Reset patience
+                patience_counter = 0
+            else:
+                patience_counter += 1
+                
+            # Early Stopping
+            if hasattr(self.config, 'early_stopping_patience') and patience_counter >= self.config.early_stopping_patience:
+                print(f"\nEarly stopping triggered after {epoch+1} epochs (Patience: {self.config.early_stopping_patience})")
+                break
         
         # Restore best model
         if best_model_state:
@@ -284,6 +340,6 @@ class Trainer:
         # Log to MLflow at the end of training (one run per fold)
         params = self.config.to_dict()
         params['fold'] = fold_idx if fold_idx is not None else 0
-        self.log_to_mlflow(params, best_metrics, best_cm_fig, nested=True)
+        self.log_to_mlflow(params, best_metrics, history, best_cm_fig, nested=True)
         
         return history

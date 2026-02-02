@@ -126,8 +126,7 @@ class KFoldCrossValidator:
                 best_model.load_state_dict(global_best_model_state)
                 
                 # Log best model to PARENT run and register it
-                # User requested to "name a model after run name"
-                model_name = experiment_run_name
+                model_name = f"{self.config.model_type}_Best"
                 mlflow.pytorch.log_model(
                     best_model, 
                     artifact_path="best_model",

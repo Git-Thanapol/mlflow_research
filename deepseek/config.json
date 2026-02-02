@@ -7,7 +7,7 @@
   "num_classes": 10,
   "batch_size": 32,
   "num_workers": 4,
-  "k_folds": 2,
+  "k_folds": 5,
   "seed": 42,
   "sample_rate": 44100,
   "n_mels": 128,
@@ -29,7 +29,7 @@
   "ast_dim": 768,
   "ast_depth": 12,
   "ast_heads": 12,
-  "epochs": 1,
+  "epochs": 50,
   "learning_rate": 0.001,
   "optimizer": "adamw",
   "scheduler": "reduce_on_plateau",
@@ -38,7 +38,7 @@
   "freq_mask_param": 15,
   "time_mask_param": 15,
   "num_masks": 2,
-  "experiment_name": "audio_spectrogram_classification",
-  "run_name": "Fold_0",
+  "experiment_name": "Test",
+  "run_name": "Fold_1",
   "tracking_uri": "http://localhost:5001"
 }
