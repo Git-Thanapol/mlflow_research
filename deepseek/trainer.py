@@ -184,9 +184,9 @@ class Trainer:
         plt.tight_layout()
         return fig
     
-    def log_to_mlflow(self, params: Dict, metrics: Dict, cm_fig: Optional[plt.Figure] = None):
+    def log_to_mlflow(self, params: Dict, metrics: Dict, cm_fig: Optional[plt.Figure] = None, nested: bool = True):
         """Log experiment data to MLflow"""
-        with mlflow.start_run(run_name=self.config.run_name):
+        with mlflow.start_run(run_name=self.config.run_name, nested=nested):
             # Log parameters
             mlflow.log_params(params)
             
@@ -199,7 +199,7 @@ class Trainer:
                 plt.close(cm_fig)
             
             # Log model
-            mlflow.pytorch.log_model(self.model, "model")
+            mlflow.pytorch.log_model(self.model, artifact_path="model")
             
             # Log additional artifacts
             if hasattr(self.config, 'to_dict'):
@@ -213,7 +213,8 @@ class Trainer:
         train_loader,
         val_loader,
         class_names: List[str],
-        fold_idx: Optional[int] = None
+        fold_idx: Optional[int] = None,
+        parent_run_id: Optional[str] = None
     ) -> Dict[str, List[float]]:
         """Main training loop"""
         
@@ -227,12 +228,16 @@ class Trainer:
         
         best_val_accuracy = 0
         best_model_state = None
+        best_metrics = {}
+        best_cm_fig = None
         
         # MLflow run name
         if fold_idx is not None:
-            self.config.run_name = f"{self.config.model_type}_fold_{fold_idx}"
+            self.config.run_name = f"Fold_{fold_idx}"
         else:
             self.config.run_name = f"{self.config.model_type}_single_run"
+            
+        print(f"Starting training for {self.config.run_name}")
         
         for epoch in range(self.config.epochs):
             self.epoch = epoch
@@ -257,32 +262,28 @@ class Trainer:
                 history[k].append(val_metrics[k])
             
             # Log to console
-            print(f"\nEpoch {epoch+1}/{self.config.epochs}")
-            print(f"Train Loss: {train_metrics['train_loss']:.4f}, "
-                  f"Accuracy: {train_metrics['train_accuracy']:.4f}")
-            print(f"Val Loss: {val_metrics['val_loss']:.4f}, "
-                  f"Accuracy: {val_metrics['val_accuracy']:.4f}")
+            print(f"Epoch {epoch+1}/{self.config.epochs} - "
+                  f"Train Acc: {train_metrics['train_accuracy']:.4f}, "
+                  f"Val Acc: {val_metrics['val_accuracy']:.4f}")
             
             # Save best model
             if val_metrics['val_accuracy'] > best_val_accuracy:
                 best_val_accuracy = val_metrics['val_accuracy']
                 best_model_state = self.model.state_dict().copy()
-                
-                # Plot confusion matrix for best epoch
-                cm_fig = self.plot_confusion_matrix(cm, class_names)
+                best_cm_fig = self.plot_confusion_matrix(cm, class_names)
                 
                 # Prepare metrics for MLflow
-                all_metrics = {**train_metrics, **val_metrics}
-                all_metrics['best_val_accuracy'] = best_val_accuracy
-                all_metrics['epoch'] = epoch + 1
-                
-                # Log to MLflow
-                params = self.config.to_dict()
-                params['fold'] = fold_idx if fold_idx is not None else 0
-                self.log_to_mlflow(params, all_metrics, cm_fig)
+                best_metrics = {**train_metrics, **val_metrics}
+                best_metrics['best_val_accuracy'] = best_val_accuracy
+                best_metrics['epoch'] = epoch + 1
         
         # Restore best model
         if best_model_state:
             self.model.load_state_dict(best_model_state)
+            
+        # Log to MLflow at the end of training (one run per fold)
+        params = self.config.to_dict()
+        params['fold'] = fold_idx if fold_idx is not None else 0
+        self.log_to_mlflow(params, best_metrics, best_cm_fig, nested=True)
         
         return history
