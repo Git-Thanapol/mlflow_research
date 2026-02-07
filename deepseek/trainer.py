@@ -6,11 +6,17 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR, StepL
 import mlflow
 import mlflow.pytorch
 import numpy as np
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score, f1_score, precision_score, recall_score, confusion_matrix,
+    roc_auc_score, average_precision_score, log_loss, matthews_corrcoef, brier_score_loss,
+    roc_curve, precision_recall_curve, calibration_curve
+)
 import seaborn as sns
 import matplotlib.pyplot as plt
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Union
 import os
+import time
+import io
 from tqdm import tqdm
 import warnings
 import pandas as pd
@@ -69,6 +75,71 @@ class Trainer:
             )
         else:
             self.scheduler = None
+            
+    def profile_model(self, loader) -> Dict[str, Any]:
+        """Profile model complexity and inference speed"""
+        self.model.eval()
+        
+        # 1. Parameter Count
+        total_params = sum(p.numel() for p in self.model.parameters())
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        
+        # 2. Model Size (MB)
+        param_size = 0
+        for param in self.model.parameters():
+            param_size += param.nelement() * param.element_size()
+        buffer_size = 0
+        for buffer in self.model.buffers():
+            buffer_size += buffer.nelement() * buffer.element_size()
+        size_all_mb = (param_size + buffer_size) / 1024**2
+        
+        # 3. Latency & Throughput
+        # Warmup
+        dummy_batch = next(iter(loader))
+        images, _, metadata = dummy_batch
+        images = images.to(self.device)
+        metadata = metadata.to(self.device) if metadata is not None else None
+        
+        with torch.no_grad():
+            for _ in range(5):
+                if self.config.model_type == "cnn_mlp":
+                    _ = self.model(images, metadata)
+                else:
+                    _ = self.model(images)
+        
+        # Measure
+        start_time = time.time()
+        num_samples = 0
+        num_batches = 0
+        limit_batches = 20 # Limit to avoid taking too long
+        
+        with torch.no_grad():
+            for i, (images, _, metadata) in enumerate(loader):
+                if i >= limit_batches: break
+                images = images.to(self.device)
+                metadata = metadata.to(self.device) if metadata is not None else None
+                
+                if self.config.model_type == "cnn_mlp":
+                    _ = self.model(images, metadata)
+                else:
+                    _ = self.model(images)
+                
+                num_samples += images.size(0)
+                num_batches += 1
+                
+        end_time = time.time()
+        total_time = end_time - start_time
+        
+        latency_ms = (total_time / num_samples) * 1000
+        throughput = num_samples / total_time
+        
+        return {
+            'total_params': total_params,
+            'trainable_params': trainable_params,
+            'model_size_mb': size_all_mb,
+            'latency_ms': latency_ms,
+            'throughput_samples_per_sec': throughput
+        }
     
     def train_epoch(self, train_loader) -> Dict[str, float]:
         """Train for one epoch"""
@@ -125,12 +196,13 @@ class Trainer:
             'train_recall': recall
         }
     
-    def validate(self, val_loader) -> Tuple[Dict[str, float], np.ndarray]:
+    def validate(self, val_loader) -> Tuple[Dict[str, float], np.ndarray, np.ndarray, np.ndarray]:
         """Validate the model"""
         self.model.eval()
         total_loss = 0
         all_preds = []
         all_labels = []
+        all_probs = []
         
         with torch.no_grad():
             for images, labels, metadata in tqdm(val_loader, desc="Validation"):
@@ -146,9 +218,18 @@ class Trainer:
                 loss = self.criterion(outputs, labels)
                 total_loss += loss.item()
                 
+                # Get probabilities and predictions
+                probs = torch.softmax(outputs, dim=1)
                 preds = torch.argmax(outputs, dim=1)
+                
+                all_probs.extend(probs.cpu().numpy())
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
+        
+        # Convert to numpy arrays
+        all_preds = np.array(all_preds)
+        all_labels = np.array(all_labels)
+        all_probs = np.array(all_probs)
         
         # Calculate metrics
         avg_loss = total_loss / len(val_loader)
@@ -156,6 +237,40 @@ class Trainer:
         f1 = f1_score(all_labels, all_preds, average='weighted')
         precision = precision_score(all_labels, all_preds, average='weighted')
         recall = recall_score(all_labels, all_preds, average='weighted')
+        mcc = matthews_corrcoef(all_labels, all_preds)
+        
+        # Advanced Metrics
+        try:
+            # Handles multiclass
+            roc_auc = roc_auc_score(all_labels, all_probs, multi_class='ovr', average='weighted')
+        except ValueError:
+            roc_auc = 0.0 # Handle cases with only one class present
+            
+        try:
+             # Average Precision (PR AUC equivalent for multiclass)
+            pr_auc = average_precision_score(
+                # One-hot encode labels for AP score
+                np.eye(all_probs.shape[1])[all_labels], 
+                all_probs, 
+                average='weighted'
+            )
+        except ValueError:
+            pr_auc = 0.0
+
+        try:
+            # Log Loss
+            logloss = log_loss(all_labels, all_probs)
+        except ValueError:
+            logloss = 0.0
+            
+        # Brier Score (Macro average for multiclass)
+        brier_scores = []
+        for i in range(all_probs.shape[1]):
+            # Binary target for class i
+            y_true_i = (all_labels == i).astype(int)
+            y_prob_i = all_probs[:, i]
+            brier_scores.append(brier_score_loss(y_true_i, y_prob_i))
+        avg_brier = np.mean(brier_scores)
         
         # Confusion matrix
         cm = confusion_matrix(all_labels, all_preds)
@@ -165,27 +280,93 @@ class Trainer:
             'val_accuracy': accuracy,
             'val_f1': f1,
             'val_precision': precision,
-            'val_recall': recall
+            'val_recall': recall,
+            'val_mcc': mcc,
+            'val_roc_auc': roc_auc,
+            'val_pr_auc': pr_auc,
+            'val_log_loss': logloss,
+            'val_brier_score': avg_brier
         }
         
-        return metrics, cm
+        return metrics, cm, all_probs, all_labels
     
     def plot_confusion_matrix(self, cm: np.ndarray, class_names: List[str]) -> plt.Figure:
         """Create confusion matrix visualization"""
         fig, ax = plt.subplots(figsize=(10, 8))
         sns.heatmap(
-            cm, annot=True, fmt='d', cmap='Blues',
+            cm, annot=False, cmap='Blues',
             xticklabels=class_names,
             yticklabels=class_names,
             ax=ax
         )
+        
+        # Manually annotate with better visibility logic
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                text_color = "white" if cm[i, j] > cm.max() / 2 else "black"
+                ax.text(j + 0.5, i + 0.5, str(cm[i, j]),
+                        ha="center", va="center", color=text_color)
+                        
         ax.set_xlabel('Predicted')
         ax.set_ylabel('True')
         ax.set_title('Confusion Matrix')
         plt.tight_layout()
         return fig
     
-    def _log_history_artifacts(self, history: Dict):
+    def plot_roc_curve(self, y_true: np.ndarray, y_probs: np.ndarray, class_names: List[str]) -> plt.Figure:
+        """Plot ROC Curve for each class"""
+        n_classes = len(class_names)
+        fig, ax = plt.subplots(figsize=(10, 8))
+        
+        for i in range(n_classes):
+            if np.sum(y_true == i) > 0: # Only plot if class is present
+                fpr, tpr, _ = roc_curve(y_true == i, y_probs[:, i])
+                roc_auc = roc_auc_score(y_true == i, y_probs[:, i])
+                ax.plot(fpr, tpr, label=f'{class_names[i]} (AUC = {roc_auc:.2f})')
+        
+        ax.plot([0, 1], [0, 1], 'k--')
+        ax.set_xlabel('False Positive Rate')
+        ax.set_ylabel('True Positive Rate')
+        ax.set_title('ROC Curve')
+        ax.legend(loc="lower right")
+        ax.grid(True)
+        return fig
+        
+    def plot_pr_curve(self, y_true: np.ndarray, y_probs: np.ndarray, class_names: List[str]) -> plt.Figure:
+        """Plot Precision-Recall Curve for each class"""
+        n_classes = len(class_names)
+        fig, ax = plt.subplots(figsize=(10, 8))
+        
+        for i in range(n_classes):
+             if np.sum(y_true == i) > 0:
+                precision, recall, _ = precision_recall_curve(y_true == i, y_probs[:, i])
+                avg_prec = average_precision_score(y_true == i, y_probs[:, i])
+                ax.plot(recall, precision, label=f'{class_names[i]} (AP = {avg_prec:.2f})')
+        
+        ax.set_xlabel('Recall')
+        ax.set_ylabel('Precision')
+        ax.set_title('Precision-Recall Curve')
+        ax.legend()
+        ax.grid(True)
+        return fig
+        
+    def plot_calibration_curve(self, y_true: np.ndarray, y_probs: np.ndarray, class_names: List[str]) -> plt.Figure:
+        """Plot Calibration Curve for each class"""
+        n_classes = len(class_names)
+        fig, ax = plt.subplots(figsize=(10, 8))
+        
+        for i in range(n_classes):
+             if np.sum(y_true == i) > 0:
+                prob_true, prob_pred = calibration_curve(y_true == i, y_probs[:, i], n_bins=10)
+                ax.plot(prob_pred, prob_true, marker='o', label=f'{class_names[i]}')
+        
+        ax.plot([0, 1], [0, 1], 'k--', label='Perfectly Calibrated')
+        ax.set_xlabel('Mean Predicted Probability')
+        ax.set_ylabel('Fraction of Positives')
+        ax.set_title('Calibration Curve')
+        ax.legend()
+        ax.grid(True)
+        return fig
         """Log history CSV and plots to MLflow"""
         # Create DataFrame
         df = pd.DataFrame(history)
@@ -226,7 +407,11 @@ class Trainer:
         plt.close(fig_loss)
         mlflow.log_artifact(loss_plot_path)
 
-    def log_to_mlflow(self, params: Dict, metrics: Dict, history: Dict, cm_fig: Optional[plt.Figure] = None, nested: bool = True):
+    def log_to_mlflow(self, params: Dict, metrics: Dict, history: Dict, 
+                      cm_fig: Optional[plt.Figure] = None, 
+                      additional_figs: Dict[str, plt.Figure] = None,
+                      summary_df: Optional[pd.DataFrame] = None,
+                      nested: bool = True):
         """Log experiment data to MLflow"""
         with mlflow.start_run(run_name=self.config.run_name, nested=nested):
             # Log parameters
@@ -239,6 +424,18 @@ class Trainer:
             if cm_fig:
                 mlflow.log_figure(cm_fig, "confusion_matrix.png")
                 plt.close(cm_fig)
+            
+            # Log additional figures
+            if additional_figs:
+                for name, fig in additional_figs.items():
+                    mlflow.log_figure(fig, f"{name}.png")
+                    plt.close(fig)
+            
+            # Log summary CSV
+            if summary_df is not None:
+                summary_path = "summary_metrics.csv"
+                summary_df.to_csv(summary_path, index=False)
+                mlflow.log_artifact(summary_path)
             
             # Log model
             mlflow.pytorch.log_model(self.model, artifact_path="model")
@@ -268,13 +465,17 @@ class Trainer:
             'train_loss': [], 'train_accuracy': [], 'train_f1': [],
             'train_precision': [], 'train_recall': [],
             'val_loss': [], 'val_accuracy': [], 'val_f1': [],
-            'val_precision': [], 'val_recall': []
+            'val_precision': [], 'val_recall': [],
+            'val_mcc': [], 'val_roc_auc': [], 'val_pr_auc': [], 
+            'val_log_loss': [], 'val_brier_score': []
         }
         
         best_val_accuracy = 0
         best_model_state = None
         best_metrics = {}
         best_cm_fig = None
+        best_probs = None
+        best_labels = None
         patience_counter = 0
         
         # MLflow run name
@@ -292,7 +493,7 @@ class Trainer:
             train_metrics = self.train_epoch(train_loader)
             
             # Validation
-            val_metrics, cm = self.validate(val_loader)
+            val_metrics, cm, val_probs, val_labels = self.validate(val_loader)
             
             # Update scheduler
             if self.scheduler:
@@ -303,9 +504,9 @@ class Trainer:
             
             # Update history
             for k in train_metrics:
-                history[k].append(train_metrics[k])
+                if k in history: history[k].append(train_metrics[k])
             for k in val_metrics:
-                history[k].append(val_metrics[k])
+                if k in history: history[k].append(val_metrics[k])
             
             # Log to console
             print(f"Epoch {epoch+1}/{self.config.epochs} - "
@@ -317,6 +518,8 @@ class Trainer:
                 best_val_accuracy = val_metrics['val_accuracy']
                 best_model_state = self.model.state_dict().copy()
                 best_cm_fig = self.plot_confusion_matrix(cm, class_names)
+                best_probs = val_probs
+                best_labels = val_labels
                 
                 # Prepare metrics for MLflow
                 best_metrics = {**train_metrics, **val_metrics}
@@ -337,9 +540,36 @@ class Trainer:
         if best_model_state:
             self.model.load_state_dict(best_model_state)
             
+        # Profile model (Complexity, Latency)
+        print("Profiling model...")
+        profile_metrics = self.profile_model(val_loader)
+        best_metrics.update(profile_metrics)
+        
+        # Generate Advanced Visualizations for Best Model
+        additional_figs = {}
+        if best_probs is not None and best_labels is not None:
+            additional_figs['roc_curve'] = self.plot_roc_curve(best_labels, best_probs, class_names)
+            additional_figs['pr_curve'] = self.plot_pr_curve(best_labels, best_probs, class_names)
+            additional_figs['calibration_curve'] = self.plot_calibration_curve(best_labels, best_probs, class_names)
+            
+        # Create Summary DataFrame (Small Table)
+        summary_data = {
+            'Metric': list(best_metrics.keys()),
+            'Value': list(best_metrics.values())
+        }
+        summary_df = pd.DataFrame(summary_data)
+        
         # Log to MLflow at the end of training (one run per fold)
         params = self.config.to_dict()
         params['fold'] = fold_idx if fold_idx is not None else 0
-        self.log_to_mlflow(params, best_metrics, history, best_cm_fig, nested=True)
+        self.log_to_mlflow(
+            params, 
+            best_metrics, 
+            history, 
+            best_cm_fig, 
+            additional_figs=additional_figs,
+            summary_df=summary_df,
+            nested=True
+        )
         
         return history
